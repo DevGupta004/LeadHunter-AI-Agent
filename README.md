@@ -50,6 +50,11 @@ Perfect for finding local business leads with contact information, ratings, and 
 ### Required for Both:
 ```bash
 # Python 3.8+
+brew install python@3.12
+python3.12 -m venv venv
+source venv/bin/activate
+
+# Python 3.8+
 python --version
 
 # Install dependencies
