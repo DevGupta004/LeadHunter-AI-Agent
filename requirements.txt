@@ -1,0 +1,16 @@
+# LeadHunter AI Agent - Dependencies
+
+# Web Interface
+streamlit>=1.28.0
+
+# Browser Automation
+playwright>=1.40.0
+
+# HTTP Requests (for AI version)
+requests>=2.31.0
+
+# Installation Instructions:
+# 1. pip install -r requirements.txt
+# 2. playwright install
+# 3. For AI version: Install Ollama and run "ollama pull llama3.2"
+
