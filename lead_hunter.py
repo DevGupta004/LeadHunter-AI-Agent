@@ -8,39 +8,161 @@ from playwright.sync_api import sync_playwright
 import time
 import re
 import json
+import pandas as pd
 from export_utils import export_to_excel, deduplicate_records, get_export_summary
 
-st.title("🗺️ Google Maps Store Scraper")
-st.caption("Simplified approach - clicks and extracts visible data")
-
-url = st.text_input(
-    "Google Maps URL",
-    value="https://www.google.com/maps/search/real+estate+business+in+lucknow",
+# Custom CSS for modern UI
+st.set_page_config(
+    page_title="LeadHunter AI Agent",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-max_stores = st.slider("Max stores to scrape", 10, 100, 20, 
-                        help="Set to 100 for all results with pagination")
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        color: white;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .main-header h1 {
+        color: white;
+        margin: 0;
+        font-size: 2.5rem;
+    }
+    .main-header p {
+        color: rgba(255, 255, 255, 0.9);
+        margin: 0.5rem 0 0 0;
+        font-size: 1.1rem;
+    }
+    .result-card {
+        background: white !important;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+        border-left: 4px solid #667eea;
+        transition: transform 0.2s;
+        color: #333333 !important;
+    }
+    .result-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+    .result-card h3 {
+        color: #333333 !important;
+    }
+    .result-card p {
+        color: #333333 !important;
+    }
+    .result-card strong {
+        color: #333333 !important;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1rem;
+        border-radius: 8px;
+        text-align: center;
+    }
+    .stButton>button {
+        width: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 0.75rem;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 1rem;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+    }
+    .info-box {
+        background: #f0f4ff !important;
+        padding: 1.5rem;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+        margin: 1rem 0;
+        color: #333333 !important;
+    }
+    .info-box h4 {
+        color: #333333 !important;
+        margin-top: 0;
+    }
+    .info-box p {
+        color: #333333 !important;
+        margin: 0.5rem 0;
+    }
+    .info-box strong {
+        color: #333333 !important;
+    }
+    .success-box {
+        background: #d4edda;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #28a745;
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-enable_pagination = st.checkbox("Enable pagination (scroll for more results)", value=True,
-                                 help="Automatically scroll to load all stores")
+# Modern Header
+st.markdown("""
+<div class="main-header">
+    <h1>🎯 LeadHunter AI Agent</h1>
+    <p>Extract business leads from Google Maps with ease</p>
+</div>
+""", unsafe_allow_html=True)
 
-st.info("""
-💡 **Enhanced Scraper - Extracts 14 Fields:**
-- ✅ Store name
-- ⭐ **Rating (out of 5)**
-- 📊 **Total ratings count**
-- 💬 **Number of reviews**
-- ✅ Full address
-- ✅ Phone number
-- ✅ Opening hours
-- ✅ Website
-- ✅ Plus code
-- ✅ Latitude & Longitude
-- ✅ Google Maps URL (CID)
-- ✅ Pagination support
+# Input Section
+col1, col2 = st.columns([2, 1])
 
-**Expected:** 40-70% success rate for ratings, 30-50% for phone numbers
-""")
+with col1:
+    url = st.text_input(
+        "🔗 Google Maps Search URL",
+    value="https://www.google.com/maps/search/real+estate+business+in+lucknow",
+        help="Paste your Google Maps search URL here"
+    )
+
+with col2:
+    max_stores = st.number_input(
+        "📊 Number of Stores",
+        min_value=5,
+        max_value=100,
+        value=20,
+        step=5,
+        help="How many stores to scrape"
+    )
+
+col3, col4 = st.columns(2)
+with col3:
+    enable_pagination = st.checkbox(
+        "🔄 Enable Pagination",
+        value=True,
+        help="Automatically scroll to load more results"
+    )
+
+with col4:
+    show_live_results = st.checkbox(
+        "👁️ Show Live Results",
+        value=True,
+        help="Display results as they are scraped"
+    )
+
+# Info Box
+st.markdown("""
+<div class="info-box" style="color: #333333;">
+    <h4 style="color: #333333; margin-top: 0;">💡 What Gets Extracted</h4>
+    <p style="color: #333333; margin: 0.5rem 0;"><strong>Always:</strong> Business Name, Location, Google Maps URL</p>
+    <p style="color: #333333; margin: 0.5rem 0;"><strong>Often (60-80%):</strong> Rating, Address, Coordinates</p>
+    <p style="color: #333333; margin: 0.5rem 0;"><strong>Sometimes (30-50%):</strong> Phone Number, Website, Hours</p>
+</div>
+""", unsafe_allow_html=True)
 
 def clean_phone(text):
     """Extract and clean phone number"""
@@ -300,13 +422,13 @@ if st.button("🚀 Start Scraping", type="primary"):
                                     rating = rating_match.group(1)
                                     reviews_count = rating_match.group(2).replace(',', '')
                                     total_ratings = reviews_count
-                                
-                                # Pattern 2: "4.5 stars" or "4.5★"
-                                if not rating:
-                                    rating_match = re.search(r'(\d\.\d)[\s\xa0]*(?:stars?|★)', top_text, re.IGNORECASE)
-                                    if rating_match:
-                                        rating = rating_match.group(1)
-                                
+                            
+                            # Pattern 2: "4.5 stars" or "4.5★"
+                            if not rating:
+                                rating_match = re.search(r'(\d\.\d)[\s\xa0]*(?:stars?|★)', top_text, re.IGNORECASE)
+                                if rating_match:
+                                    rating = rating_match.group(1)
+                            
                                 # Pattern 3: Look for review count separately near rating
                                 if not reviews_count and rating:
                                     # Look in a wider context around the rating
@@ -408,7 +530,7 @@ if st.button("🚀 Start Scraping", type="primary"):
                                 # Get all matches and filter
                                 all_phones = []
                                 for pattern in phone_patterns:
-                                    matches = re.findall(pattern, page_text)
+                                    matches = re.findall(pattern, panel_text)
                                     all_phones.extend(matches)
                                 
                                 # Filter out common numbers and pick the most likely one
@@ -588,22 +710,33 @@ if st.button("🚀 Start Scraping", type="primary"):
                         
                         results.append(result)
                         
-                        # Show in UI
-                        with st.expander(f"⭐ {result['rating']} | {name} ({result['total_ratings']} ratings)", expanded=False):
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(f"**⭐ Rating:** {result['rating']}/5.0")
-                                st.write(f"**📊 Total Ratings:** {result['total_ratings']}")
-                                st.write(f"**💬 Reviews Count:** {result['reviews_count']}")
-                                st.write(f"**📞 Phone:** {result['phone_number']}")
-                                st.write(f"**🌐 Website:** {result['website']}")
-                            with col2:
-                                st.write(f"**📍 Address:** {result['address']}")
-                                st.write(f"**🕐 Hours:** {result['opening_hours']}")
-                                st.write(f"**📌 Plus Code:** {result['plus_code']}")
-                                st.write(f"**🌍 Coordinates:** {result['latitude']}, {result['longitude']}")
-                                st.write(f"**🔗 CID:** {result['cid']}")
-                            st.write(f"**🗺️ Maps URL:** {result['google_maps_url'][:80]}...")
+                        # Show in UI - Modern Card View
+                        if show_live_results:
+                            rating_display = result['rating'] if result['rating'] != 'N/A' else "N/A"
+                            rating_color = "#28a745" if result['rating'] != 'N/A' else "#6c757d"
+                            
+                            st.markdown(f"""
+                            <div class="result-card" style="color: #333333 !important; background: white !important;">
+                                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                                    <h3 style="margin: 0; color: #333333 !important; font-size: 1.3rem;">{name}</h3>
+                                    <span style="background: {rating_color}; color: white; padding: 0.3rem 0.8rem; border-radius: 20px; font-weight: bold;">
+                                        ⭐ {rating_display}
+                                    </span>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+                                    <div style="color: #333333 !important;">
+                                        <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">📞 Phone:</strong> <span style="color: #333333 !important;">{result['phone_number']}</span></p>
+                                        <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">🌐 Website:</strong> <span style="color: #333333 !important;">{result['website'] if len(str(result['website'])) < 50 else result['website'][:47] + '...'}</span></p>
+                                        <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">📊 Reviews:</strong> <span style="color: #333333 !important;">{result['total_ratings']}</span></p>
+                                    </div>
+                                    <div style="color: #333333 !important;">
+                                        <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">📍 Address:</strong> <span style="color: #333333 !important;">{result['address'] if len(str(result['address'])) < 60 else result['address'][:57] + '...'}</span></p>
+                                        <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">🕐 Hours:</strong> <span style="color: #333333 !important;">{result['opening_hours'] if len(str(result['opening_hours'])) < 40 else result['opening_hours'][:37] + '...'}</span></p>
+                                        <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">🌍 Location:</strong> <span style="color: #333333 !important;">{result['latitude']}, {result['longitude']}</span></p>
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
                         
                     except Exception as e:
                         st.warning(f"⚠️ Error with store {i+1}: {str(e)}")
@@ -611,32 +744,93 @@ if st.button("🚀 Start Scraping", type="primary"):
                 
                 browser.close()
                 
-                # Summary
-                st.success(f"✅ Completed! Scraped {len(results)} stores")
+                # Summary Section
+                st.markdown("---")
+                st.markdown("""
+                <div class="success-box">
+                    <h2 style="margin: 0; color: #155724;">✅ Scraping Completed!</h2>
+                    <p style="margin: 0.5rem 0 0 0; font-size: 1.1rem;">Successfully scraped <strong>{}</strong> stores</p>
+                </div>
+                """.format(len(results)), unsafe_allow_html=True)
                 
-                # Statistics
+                # Statistics with better styling
+                st.markdown("### 📊 Extraction Statistics")
                 col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    ratings_found = sum(1 for r in results if r['rating'] != 'N/A')
-                    st.metric("⭐ Ratings", f"{ratings_found}/{len(results)}")
-                with col2:
-                    phones_found = sum(1 for r in results if r['phone_number'] != 'Not found')
-                    st.metric("📞 Phones", f"{phones_found}/{len(results)}")
-                with col3:
-                    coords_found = sum(1 for r in results if r['latitude'] != 'Not found')
-                    st.metric("🌍 Coordinates", f"{coords_found}/{len(results)}")
-                with col4:
-                    websites_found = sum(1 for r in results if r['website'] != 'Not found')
-                    st.metric("🌐 Websites", f"{websites_found}/{len(results)}")
                 
-                # Export options
+                ratings_found = sum(1 for r in results if r['rating'] != 'N/A')
+                phones_found = sum(1 for r in results if r['phone_number'] != 'Not found')
+                coords_found = sum(1 for r in results if r['latitude'] != 'Not found')
+                websites_found = sum(1 for r in results if r['website'] != 'Not found')
+                
+                with col1:
+                    st.metric("⭐ Ratings Found", f"{ratings_found}", f"{len(results)} total")
+                with col2:
+                    st.metric("📞 Phone Numbers", f"{phones_found}", f"{len(results)} total")
+                with col3:
+                    st.metric("🌍 Coordinates", f"{coords_found}", f"{len(results)} total")
+                with col4:
+                    st.metric("🌐 Websites", f"{websites_found}", f"{len(results)} total")
+                
+                # Results Table View
                 if results:
                     st.markdown("---")
-                    st.subheader("📥 Export Results")
+                    st.markdown("### 📋 Results Summary Table")
+                    
+                    # Create DataFrame for table view
+                    df_data = []
+                    for r in results:
+                        df_data.append({
+                            'Business Name': r['store_name'],
+                            'Rating': r['rating'],
+                            'Phone': r['phone_number'] if r['phone_number'] != 'Not found' else '',
+                            'Address': r['address'] if r['address'] != 'Not found' else '',
+                            'Website': r['website'] if r['website'] != 'Not found' else '',
+                        })
+                    
+                    df = pd.DataFrame(df_data)
+                    st.dataframe(
+                        df,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400
+                    )
+                
+                # Export options - Modern Design
+                if results:
+                    st.markdown("---")
+                    st.markdown("### 📥 Export Results")
                     
                     # Deduplicate for summary
                     unique_records = deduplicate_records(results)
-                    st.markdown(get_export_summary(len(results), len(unique_records)))
+                    
+                    col1, col2, col3 = st.columns([1, 1, 1])
+                    
+                    with col1:
+                        st.markdown(f"""
+                        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; text-align: center;">
+                            <h4 style="margin: 0; color: #333;">📊 Original</h4>
+                            <p style="font-size: 1.5rem; margin: 0.5rem 0; font-weight: bold; color: #667eea;">{len(results)}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f"""
+                        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; text-align: center;">
+                            <h4 style="margin: 0; color: #333;">✅ Unique</h4>
+                            <p style="font-size: 1.5rem; margin: 0.5rem 0; font-weight: bold; color: #28a745;">{len(unique_records)}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col3:
+                        duplicates_removed = len(results) - len(unique_records)
+                        st.markdown(f"""
+                        <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; text-align: center;">
+                            <h4 style="margin: 0; color: #333;">🗑️ Duplicates</h4>
+                            <p style="font-size: 1.5rem; margin: 0.5rem 0; font-weight: bold; color: #dc3545;">{duplicates_removed}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
                     
                     col1, col2 = st.columns(2)
                     
@@ -644,24 +838,28 @@ if st.button("🚀 Start Scraping", type="primary"):
                         # Excel export for telecalling team
                         excel_file = export_to_excel(results, 'telecalling_leads.xlsx')
                         st.download_button(
-                            "📊 Download Excel (Telecalling Team)",
+                            "📊 Download Excel File",
                             data=excel_file.getvalue(),
                             file_name="telecalling_leads.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            help="Excel file with unique records: Name, Contact, Location, Website, Rating"
+                            help="Perfect for telecalling teams - includes Name, Contact, Location, Website, Rating"
                         )
                     
                     with col2:
                         # JSON export (full data)
                         st.download_button(
-                            "📥 Download JSON (Full Data)",
+                            "📥 Download JSON File",
                             data=json.dumps(results, indent=2, ensure_ascii=False),
                             file_name="google_maps_results.json",
                             mime="application/json",
-                            help="Complete data in JSON format"
+                            help="Complete data in JSON format for developers"
                         )
                     
-                    st.info("💡 **Tip:** Upload the Excel file to Google Sheets for team collaboration!")
+                    st.markdown("""
+                    <div class="info-box" style="margin-top: 1rem; color: #333333;">
+                        <p style="margin: 0; color: #333333;">💡 <strong>Tip:</strong> Upload the Excel file to Google Sheets for easy team collaboration!</p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
@@ -680,57 +878,12 @@ if st.button("🚀 Start Scraping", type="primary"):
                → Use Google Places API for reliable data
             """)
 
+# Footer Section
 st.markdown("---")
-
-st.subheader("📋 What Gets Extracted")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("""
-    **✅ Always extracted:**
-    - Store name
-    - Google Maps URL
-    - Number in list
-    
-    **⚠️ Often found (60-80%):**
-    - Latitude & Longitude
-    - Address
-    - CID/Place ID
-    """)
-
-with col2:
-    st.markdown("""
-    **🎯 Sometimes found (30-50%):**
-    - Phone number
-    - Rating & reviews
-    - Opening hours
-    - Website
-    - Plus code
-    """)
-
-st.markdown("---")
-
-st.subheader("💡 Tips & Tricks")
 st.markdown("""
-**For best results:**
-
-1. **Start small** - Test with 10-20 stores first
-2. **Enable pagination** - Loads more results automatically
-3. **Watch the browser** - See what's being clicked
-4. **Check screenshot** - `debug_screenshot.png` shows the view
-5. **Be patient** - Takes 5-7 seconds per store
-
-**If it fails:**
-- Google may block after too many requests
-- Wait 10 minutes and try again
-- Try a different search term
-- Use fewer stores per run
-
-**For production/reliable data:**
-- Google Places API gives 95%+ success rate
-- Much faster (no clicking required)
-- 5,000 free API calls per month
-- Worth $0.20 for 100 stores vs hours of debugging! 😊
-""")
+<div style="text-align: center; padding: 2rem; color: #666;">
+    <p style="margin: 0;">Made with ❤️ for Lead Generation</p>
+    <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">For support and updates, check the README.md file</p>
+</div>
+""", unsafe_allow_html=True)
 

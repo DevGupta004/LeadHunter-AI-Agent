@@ -10,10 +10,125 @@ import time
 import json
 import requests
 import re
+import pandas as pd
 from export_utils import export_to_excel, deduplicate_records, get_export_summary
 
-st.title("🤖 AI-Powered Google Maps Scraper")
-st.caption("Using Local Llama 3.2 for Intelligent Extraction")
+# Custom CSS for modern UI
+st.set_page_config(
+    page_title="LeadHunter AI Agent - AI Mode",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        color: white;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .main-header h1 {
+        color: white;
+        margin: 0;
+        font-size: 2.5rem;
+    }
+    .main-header p {
+        color: rgba(255, 255, 255, 0.9);
+        margin: 0.5rem 0 0 0;
+        font-size: 1.1rem;
+    }
+    .result-card {
+        background: white !important;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+        border-left: 4px solid #f5576c;
+        transition: transform 0.2s;
+        color: #333333 !important;
+    }
+    .result-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+    .result-card h3 {
+        color: #333333 !important;
+    }
+    .result-card p {
+        color: #333333 !important;
+    }
+    .result-card strong {
+        color: #333333 !important;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 1rem;
+        border-radius: 8px;
+        text-align: center;
+    }
+    .stButton>button {
+        width: 100%;
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        border: none;
+        padding: 0.75rem;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 1rem;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(245, 87, 108, 0.4);
+    }
+    .info-box {
+        background: #fff0f5 !important;
+        padding: 1.5rem;
+        border-radius: 8px;
+        border-left: 4px solid #f5576c;
+        margin: 1rem 0;
+        color: #333333 !important;
+    }
+    .info-box h4 {
+        color: #333333 !important;
+        margin-top: 0;
+    }
+    .info-box p {
+        color: #333333 !important;
+        margin: 0.5rem 0;
+    }
+    .info-box strong {
+        color: #333333 !important;
+    }
+    .success-box {
+        background: #d4edda;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #28a745;
+        margin: 1rem 0;
+    }
+    .ai-badge {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        padding: 0.2rem 0.6rem;
+        border-radius: 15px;
+        font-size: 0.8rem;
+        font-weight: bold;
+        display: inline-block;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Modern Header
+st.markdown("""
+<div class="main-header">
+    <h1>🤖 LeadHunter AI Agent - AI Mode</h1>
+    <p>Intelligent extraction using Local Llama 3.2 AI</p>
+</div>
+""", unsafe_allow_html=True)
 
 # Configuration
 url = st.text_input(
@@ -482,19 +597,38 @@ if st.button("🚀 Start AI-Powered Scraping", type="primary"):
                     
                     results.append(result)
                     
-                    # Show result
-                    method_icon = "🤖" if ai_data else "⚡"
-                    with st.expander(f"{method_icon} {store_name} - ⭐ {rating}", expanded=False):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write(f"**Extraction:** {result['extraction_method']}")
-                            st.write(f"**⭐ Rating:** {rating} ({reviews} reviews)")
-                            st.write(f"**📞 Phone:** {phone}")
-                            st.write(f"**🕐 Hours:** {hours}")
-                        with col2:
-                            st.write(f"**📍 Address:** {address[:80]}...")
-                            st.write(f"**🌐 Website:** {website}")
-                            st.write(f"**🌍 Coords:** {lat}, {lng}")
+                    # Show result - Modern Card View
+                    if show_live_results:
+                        method_badge = "🤖 AI" if ai_data else "⚡ Regex"
+                        method_color = "#f5576c" if ai_data else "#667eea"
+                        rating_display = rating if rating != 'N/A' else "N/A"
+                        rating_color = "#28a745" if rating != 'N/A' else "#6c757d"
+                        
+                        st.markdown(f"""
+                        <div class="result-card" style="color: #333333 !important; background: white !important;">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                                <div>
+                                    <h3 style="margin: 0; color: #333333 !important; font-size: 1.3rem;">{store_name}</h3>
+                                    <span class="ai-badge" style="background: {method_color}; margin-top: 0.5rem; display: inline-block;">{method_badge}</span>
+                                </div>
+                                <span style="background: {rating_color}; color: white; padding: 0.3rem 0.8rem; border-radius: 20px; font-weight: bold;">
+                                    ⭐ {rating_display}
+                                </span>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+                                <div style="color: #333333 !important;">
+                                    <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">📞 Phone:</strong> <span style="color: #333333 !important;">{phone}</span></p>
+                                    <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">🌐 Website:</strong> <span style="color: #333333 !important;">{website if len(str(website)) < 50 else str(website)[:47] + '...'}</span></p>
+                                    <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">📊 Reviews:</strong> <span style="color: #333333 !important;">{reviews}</span></p>
+                                </div>
+                                <div style="color: #333333 !important;">
+                                    <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">📍 Address:</strong> <span style="color: #333333 !important;">{address if len(str(address)) < 60 else str(address)[:57] + '...'}</span></p>
+                                    <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">🕐 Hours:</strong> <span style="color: #333333 !important;">{hours if len(str(hours)) < 40 else str(hours)[:37] + '...'}</span></p>
+                                    <p style="margin: 0.3rem 0; color: #333333 !important;"><strong style="color: #333333 !important;">🌍 Location:</strong> <span style="color: #333333 !important;">{lat}, {lng}</span></p>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
                     
                 except Exception as e:
                     st.warning(f"⚠️ Error with store {i+1}: {str(e)}")
@@ -502,32 +636,94 @@ if st.button("🚀 Start AI-Powered Scraping", type="primary"):
             
             browser.close()
             
-            # Summary
-            st.success(f"✅ Completed! Scraped {len(results)} stores")
+            # Summary Section
+            st.markdown("---")
+            st.markdown("""
+            <div class="success-box">
+                <h2 style="margin: 0; color: #155724;">✅ AI Scraping Completed!</h2>
+                <p style="margin: 0.5rem 0 0 0; font-size: 1.1rem;">Successfully scraped <strong>{}</strong> stores</p>
+            </div>
+            """.format(len(results)), unsafe_allow_html=True)
             
-            # Statistics
+            # Statistics with better styling
+            st.markdown("### 📊 Extraction Statistics")
             col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                ai_count = sum(1 for r in results if r['extraction_method'] == 'AI')
-                st.metric("🤖 AI Extracted", f"{ai_count}/{len(results)}")
-            with col2:
-                phones = sum(1 for r in results if r['phone_number'] != 'Not found')
-                st.metric("📞 Phones", f"{phones}/{len(results)}")
-            with col3:
-                ratings = sum(1 for r in results if r['rating'] != 'N/A')
-                st.metric("⭐ Ratings", f"{ratings}/{len(results)}")
-            with col4:
-                addresses = sum(1 for r in results if r['address'] != 'Not found')
-                st.metric("📍 Addresses", f"{addresses}/{len(results)}")
             
-            # Export options
+            ai_count = sum(1 for r in results if r['extraction_method'] == 'AI')
+            phones = sum(1 for r in results if r['phone_number'] != 'Not found')
+            ratings = sum(1 for r in results if r['rating'] != 'N/A')
+            addresses = sum(1 for r in results if r['address'] != 'Not found')
+            
+            with col1:
+                st.metric("🤖 AI Extracted", f"{ai_count}", f"{len(results)} total")
+            with col2:
+                st.metric("📞 Phone Numbers", f"{phones}", f"{len(results)} total")
+            with col3:
+                st.metric("⭐ Ratings", f"{ratings}", f"{len(results)} total")
+            with col4:
+                st.metric("📍 Addresses", f"{addresses}", f"{len(results)} total")
+            
+            # Results Table View
             if results:
                 st.markdown("---")
-                st.subheader("📥 Export Results")
+                st.markdown("### 📋 Results Summary Table")
+                
+                # Create DataFrame for table view
+                df_data = []
+                for r in results:
+                    df_data.append({
+                        'Business Name': r['store_name'],
+                        'Method': r['extraction_method'],
+                        'Rating': r['rating'],
+                        'Phone': r['phone_number'] if r['phone_number'] != 'Not found' else '',
+                        'Address': r['address'] if r['address'] != 'Not found' else '',
+                        'Website': r['website'] if r['website'] != 'Not found' else '',
+                    })
+                
+                df = pd.DataFrame(df_data)
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
+                )
+            
+            # Export options - Modern Design
+            if results:
+                st.markdown("---")
+                st.markdown("### 📥 Export Results")
                 
                 # Deduplicate for summary
                 unique_records = deduplicate_records(results)
-                st.markdown(get_export_summary(len(results), len(unique_records)))
+                
+                col1, col2, col3 = st.columns([1, 1, 1])
+                
+                with col1:
+                    st.markdown(f"""
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; text-align: center;">
+                        <h4 style="margin: 0; color: #333;">📊 Original</h4>
+                        <p style="font-size: 1.5rem; margin: 0.5rem 0; font-weight: bold; color: #f5576c;">{len(results)}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown(f"""
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; text-align: center;">
+                        <h4 style="margin: 0; color: #333;">✅ Unique</h4>
+                        <p style="font-size: 1.5rem; margin: 0.5rem 0; font-weight: bold; color: #28a745;">{len(unique_records)}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col3:
+                    duplicates_removed = len(results) - len(unique_records)
+                    st.markdown(f"""
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; text-align: center;">
+                        <h4 style="margin: 0; color: #333;">🗑️ Duplicates</h4>
+                        <p style="font-size: 1.5rem; margin: 0.5rem 0; font-weight: bold; color: #dc3545;">{duplicates_removed}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
                 
                 col1, col2 = st.columns(2)
                 
@@ -535,24 +731,28 @@ if st.button("🚀 Start AI-Powered Scraping", type="primary"):
                     # Excel export for telecalling team
                     excel_file = export_to_excel(results, 'telecalling_leads.xlsx')
                     st.download_button(
-                        "📊 Download Excel (Telecalling Team)",
+                        "📊 Download Excel File",
                         data=excel_file.getvalue(),
                         file_name="telecalling_leads.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        help="Excel file with unique records: Name, Contact, Location, Website, Rating"
+                        help="Perfect for telecalling teams - includes Name, Contact, Location, Website, Rating"
                     )
                 
                 with col2:
                     # JSON export (full data)
                     st.download_button(
-                        "📥 Download JSON (Full Data)",
+                        "📥 Download JSON File",
                         data=json.dumps(results, indent=2, ensure_ascii=False),
                         file_name="google_maps_ai_results.json",
                         mime="application/json",
-                        help="Complete data in JSON format"
+                        help="Complete data in JSON format for developers"
                     )
                 
-                st.info("💡 **Tip:** Upload the Excel file to Google Sheets for team collaboration!")
+                st.markdown("""
+                <div class="info-box" style="margin-top: 1rem; color: #333333;">
+                    <p style="margin: 0; color: #333333;">💡 <strong>Tip:</strong> Upload the Excel file to Google Sheets for easy team collaboration!</p>
+                </div>
+                """, unsafe_allow_html=True)
             
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
