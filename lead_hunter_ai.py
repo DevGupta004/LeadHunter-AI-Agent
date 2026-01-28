@@ -10,6 +10,7 @@ import time
 import json
 import requests
 import re
+from export_utils import export_to_excel, deduplicate_records, get_export_summary
 
 st.title("🤖 AI-Powered Google Maps Scraper")
 st.caption("Using Local Llama 3.2 for Intelligent Extraction")
@@ -76,19 +77,20 @@ Text: {text[:1500]}
 def extract_all_fields_with_ai(text):
     """Use AI to extract all fields at once (more efficient)"""
     prompt = f"""From this Google Maps store page, extract the following information.
+IMPORTANT: Extract ONLY the phone number for THIS SPECIFIC STORE, not from navigation or common elements.
 Return ONLY a JSON object with these exact fields:
 
 {{
   "store_name": "name here",
   "rating": "4.5 or N/A",
   "reviews_count": "number or N/A",
-  "phone": "phone number or Not found",
+  "phone": "phone number for THIS store only or Not found",
   "address": "full address or Not found",
   "hours": "opening hours or Not found",
   "website": "website URL or Not found"
 }}
 
-Text from page:
+Text from page (focus on store details section):
 {text[:2000]}
 
 JSON:"""
@@ -111,18 +113,109 @@ def extract_coords_from_url(url):
         return coords_match.group(1), coords_match.group(2)
     return None, None
 
-def extract_phone_fallback(text):
-    """Regex fallback for phone (fast)"""
-    patterns = [
-        r'\d{5}\s?\d{5}',
-        r'\+91[\s-]?\d{10}',
-        r'0\d{2,4}[\s-]?\d{6,8}',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(0)
-    return None
+def extract_phone_fallback(page, page_text):
+    """Regex fallback for phone - Target store details specifically"""
+    phone = None
+    try:
+        # Method 1: Look for phone button/link in store details
+        phone_selectors = [
+            'button[data-item-id*="phone"]',
+            'a[href^="tel:"]',
+            '[data-item-id*="phone"]',
+            '[aria-label*="phone" i]',
+            '[aria-label*="call" i]',
+        ]
+        
+        for selector in phone_selectors:
+            try:
+                phone_element = page.query_selector(selector)
+                if phone_element:
+                    phone_text = phone_element.inner_text()
+                    # Extract phone from text
+                    phone_match = re.search(r'[\d\s\+\-\(\)]{10,}', phone_text)
+                    if phone_match:
+                        phone = phone_match.group(0).strip()
+                        break
+                    
+                    # Check href for tel: links
+                    href = phone_element.get_attribute('href')
+                    if href and href.startswith('tel:'):
+                        phone = href.replace('tel:', '').strip()
+                        break
+            except:
+                continue
+        
+        # Method 2: Look for phone in store details panel (more targeted)
+        if not phone:
+            # Try to find the details panel
+            details_panel = page.query_selector('[role="main"], [class*="panel"], [class*="details"]')
+            if details_panel:
+                panel_text = details_panel.inner_text()
+                # Look for phone near keywords
+                phone_keywords = ['phone', 'call', 'tel', 'contact']
+                for keyword in phone_keywords:
+                    # Find text around keyword
+                    keyword_pos = panel_text.lower().find(keyword)
+                    if keyword_pos != -1:
+                        # Extract 200 chars around keyword
+                        start = max(0, keyword_pos - 50)
+                        end = min(len(panel_text), keyword_pos + 150)
+                        context = panel_text[start:end]
+                        
+                        # Extract phone from context
+                        patterns = [
+                            r'\d{5}\s?\d{5}',  # Indian format: 12345 67890
+                            r'\d{3,4}[\s-]?\d{3,4}[\s-]?\d{4}',  # General: 1234-567-8900
+                            r'\+91[\s-]?\d{10}',  # +91 format
+                            r'0\d{2,4}[\s-]?\d{6,8}',  # Landline: 0522-1234567
+                            r'\+?\d[\d\s\-\(\)]{9,}',  # General international
+                        ]
+                        
+                        for pattern in patterns:
+                            match = re.search(pattern, context)
+                            if match:
+                                phone = match.group(0).strip()
+                                # Filter out common non-phone numbers
+                                if len(phone) >= 10 and not phone.startswith('1800'):
+                                    break
+                        
+                        if phone:
+                            break
+        
+        # Method 3: Fallback - search entire page but filter better
+        if not phone:
+            patterns = [
+                r'\d{5}\s?\d{5}',  # Indian format: 12345 67890
+                r'\d{3,4}[\s-]?\d{3,4}[\s-]?\d{4}',  # General: 1234-567-8900
+                r'\+91[\s-]?\d{10}',  # +91 format
+                r'0\d{2,4}[\s-]?\d{6,8}',  # Landline: 0522-1234567
+            ]
+            
+            # Get all matches and filter
+            all_phones = []
+            for pattern in patterns:
+                matches = re.findall(pattern, page_text)
+                all_phones.extend(matches)
+            
+            # Filter out common numbers and pick the most likely one
+            filtered_phones = []
+            for p in all_phones:
+                p_clean = p.strip()
+                # Skip if too short or common patterns
+                if len(p_clean) >= 10:
+                    # Skip common Google/help numbers
+                    if not (p_clean.startswith('1800') or 
+                            p_clean.startswith('1-800') or
+                            'google' in p_clean.lower()):
+                        filtered_phones.append(p_clean)
+            
+            # Use the first valid phone, or None if none found
+            if filtered_phones:
+                phone = filtered_phones[0]
+    except Exception as e:
+        pass
+    
+    return phone
 
 # Check if Ollama is running
 def check_ollama():
@@ -235,23 +328,50 @@ if st.button("🚀 Start AI-Powered Scraping", type="primary"):
                         continue
                     
                     # Wait for URL to change (indicates new store loaded)
+                    url_changed = False
                     for wait_attempt in range(15):  # Try for 15 seconds
-                        time.sleep(1)
+                        time.sleep(0.5)
                         if page.url != old_url:
+                            url_changed = True
                             break
                     
-                    # Extra wait for content to fully load
-                    time.sleep(5)
+                    # Wait for details panel to load with new content
+                    details_panel_loaded = False
+                    for wait_attempt in range(10):
+                        try:
+                            details_panel = page.query_selector('[role="main"]')
+                            if details_panel:
+                                panel_text = details_panel.inner_text()
+                                # Check if panel has meaningful content (not just loading)
+                                if len(panel_text) > 50:
+                                    details_panel_loaded = True
+                                    break
+                        except:
+                            pass
+                        time.sleep(0.5)
                     
-                    # Wait for store name element to be visible
+                    # Extra wait for content to stabilize
+                    time.sleep(2)
+                    
+                    # Wait for store name element to be visible in details panel
                     try:
-                        page.wait_for_selector('h1', timeout=10000)
+                        page.wait_for_selector('[role="main"] h1', timeout=10000)
                     except:
-                        pass
+                        try:
+                            page.wait_for_selector('h1', timeout=5000)
+                        except:
+                            pass
                     
-                    # Get FRESH page data
+                    # Get FRESH page data from DETAILS PANEL specifically
                     current_url = page.url
-                    page_text = page.inner_text('body')
+                    
+                    # Extract from details panel, not entire body
+                    details_panel = page.query_selector('[role="main"]')
+                    if not details_panel:
+                        details_panel = page.query_selector('body')
+                    
+                    panel_text = details_panel.inner_text() if details_panel else ""
+                    page_text = panel_text  # Use panel text for AI extraction
                     
                     # Debug: Show URL change
                     if current_url == old_url:
@@ -277,17 +397,59 @@ if st.button("🚀 Start AI-Powered Scraping", type="primary"):
                         # AI failed, fallback to regex
                         status_text.text(f"⚡ Using regex fallback for store {i+1}...")
                         
-                        # Basic extraction
-                        name_el = page.query_selector('h1')
-                        store_name = name_el.inner_text() if name_el else "Unknown"
+                        # Extract name from details panel
+                        store_name = "Unknown"
+                        name_selectors = [
+                            '[role="main"] h1',
+                            '[role="main"] [class*="fontHeadlineLarge"]',
+                            'h1[data-attrid="title"]',
+                            'h1',
+                        ]
                         
-                        rating_match = re.search(r'(\d\.\d)', page_text)
-                        rating = rating_match.group(1) if rating_match else 'N/A'
+                        for selector in name_selectors:
+                            try:
+                                name_el = page.query_selector(selector)
+                                if name_el:
+                                    name_text = name_el.inner_text().strip()
+                                    if len(name_text) > 3 and name_text not in ['Directions', 'Save', 'Share']:
+                                        store_name = name_text[:200]
+                                        break
+                            except:
+                                continue
                         
-                        review_match = re.search(r'\((\d+(?:,\d+)?)\)', page_text)
-                        reviews = review_match.group(1).replace(',', '') if review_match else 'N/A'
+                        # Extract rating from details panel (first 500 chars where rating appears)
+                        rating = 'N/A'
+                        if panel_text:
+                            top_text = panel_text[:500]
+                            rating_match = re.search(r'(\d\.\d)[\s\xa0]*\((\d+(?:,\d+)?)\)', top_text)
+                            if rating_match:
+                                rating_val = float(rating_match.group(1))
+                                if 1.0 <= rating_val <= 5.0:
+                                    rating = rating_match.group(1)
+                                    reviews = rating_match.group(2).replace(',', '')
+                                else:
+                                    # Try simpler pattern
+                                    rating_match = re.search(r'(\d\.\d)', top_text)
+                                    if rating_match:
+                                        rating_val = float(rating_match.group(1))
+                                        if 1.0 <= rating_val <= 5.0:
+                                            rating = rating_match.group(1)
+                            else:
+                                rating_match = re.search(r'(\d\.\d)', top_text)
+                                if rating_match:
+                                    rating_val = float(rating_match.group(1))
+                                    if 1.0 <= rating_val <= 5.0:
+                                        rating = rating_match.group(1)
                         
-                        phone = extract_phone_fallback(page_text)
+                        # Extract reviews count
+                        reviews = 'N/A'
+                        if panel_text and rating != 'N/A':
+                            top_text = panel_text[:500]
+                            review_match = re.search(r'\((\d+(?:,\d+)?)\)', top_text)
+                            if review_match:
+                                reviews = review_match.group(1).replace(',', '')
+                        
+                        phone = extract_phone_fallback(page, page_text)
                         if not phone:
                             phone = 'Not found'
                         
@@ -358,14 +520,39 @@ if st.button("🚀 Start AI-Powered Scraping", type="primary"):
                 addresses = sum(1 for r in results if r['address'] != 'Not found')
                 st.metric("📍 Addresses", f"{addresses}/{len(results)}")
             
-            # Download
+            # Export options
             if results:
-                st.download_button(
-                    "📥 Download Results (JSON)",
-                    data=json.dumps(results, indent=2, ensure_ascii=False),
-                    file_name="google_maps_ai_results.json",
-                    mime="application/json"
-                )
+                st.markdown("---")
+                st.subheader("📥 Export Results")
+                
+                # Deduplicate for summary
+                unique_records = deduplicate_records(results)
+                st.markdown(get_export_summary(len(results), len(unique_records)))
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Excel export for telecalling team
+                    excel_file = export_to_excel(results, 'telecalling_leads.xlsx')
+                    st.download_button(
+                        "📊 Download Excel (Telecalling Team)",
+                        data=excel_file.getvalue(),
+                        file_name="telecalling_leads.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        help="Excel file with unique records: Name, Contact, Location, Website, Rating"
+                    )
+                
+                with col2:
+                    # JSON export (full data)
+                    st.download_button(
+                        "📥 Download JSON (Full Data)",
+                        data=json.dumps(results, indent=2, ensure_ascii=False),
+                        file_name="google_maps_ai_results.json",
+                        mime="application/json",
+                        help="Complete data in JSON format"
+                    )
+                
+                st.info("💡 **Tip:** Upload the Excel file to Google Sheets for team collaboration!")
             
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
